@@ -1,0 +1,5 @@
+# Normalise line endings to LF in the repo. Windows checkouts otherwise turn
+# shell scripts / SQL into CRLF, which breaks scripts inside Linux containers.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

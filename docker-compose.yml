@@ -1,93 +1,172 @@
+name: bookwise
+
+# Shared settings for every Node service (YAML anchor, merged with `<<:`).
+x-node-service: &node-service
+  restart: unless-stopped
+  init: true # tini as PID 1: forwards signals, reaps zombies
+  networks: [backend]
+
+x-node-env: &node-env
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+x-postgres: &postgres
+  image: postgres:15-alpine
+  restart: unless-stopped
+  networks: [backend]
+  healthcheck:
+    test: ['CMD-SHELL', 'pg_isready -U postgres -d $${POSTGRES_DB}']
+    interval: 5s
+    timeout: 5s
+    retries: 10
+
+x-db-password: &db-password ${POSTGRES_PASSWORD:-password}
 
 services:
+  # ── Infrastructure ───────────────────────────────────────────
+  # Host ports are bound to 127.0.0.1 only: reachable for local development
+  # (`npm run dev` + a DB GUI) but not from other machines on the network.
 
-  # ── PostgreSQL: Order Service DB ─────────────────────────
   order-db:
-    image: postgres:15-alpine
+    <<: *postgres
     container_name: bookwise-order-db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: *db-password
       POSTGRES_DB: orderdb
-    ports:
-      - "5432:5432"
-    volumes:
-      - order-db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    ports: ['127.0.0.1:5432:5432']
+    volumes: [order-db-data:/var/lib/postgresql/data]
 
-  # ── PostgreSQL: Inventory Service DB ─────────────────────
   inventory-db:
-    image: postgres:15-alpine
+    <<: *postgres
     container_name: bookwise-inventory-db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: *db-password
       POSTGRES_DB: inventorydb
-    ports:
-      - "5433:5432"
-    volumes:
-      - inventory-db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    ports: ['127.0.0.1:5433:5432']
+    volumes: [inventory-db-data:/var/lib/postgresql/data]
 
-  # ── PostgreSQL: Payment Service DB ───────────────────────
   payment-db:
-    image: postgres:15-alpine
+    <<: *postgres
     container_name: bookwise-payment-db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: *db-password
       POSTGRES_DB: paymentdb
-    ports:
-      - "5434:5432"
-    volumes:
-      - payment-db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    ports: ['127.0.0.1:5434:5432']
+    volumes: [payment-db-data:/var/lib/postgresql/data]
 
-  # ── Redis ────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: bookwise-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
+    restart: unless-stopped
+    networks: [backend]
+    ports: ['127.0.0.1:6379:6379']
+    volumes: [redis-data:/data]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  # ── RabbitMQ ─────────────────────────────────────────────
   rabbitmq:
     image: rabbitmq:3.12-management-alpine
     container_name: bookwise-rabbitmq
+    restart: unless-stopped
+    networks: [backend]
     environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
-      - "5672:5672"    # AMQP protocol (your services connect here)
-      - "15672:15672"  # Management UI (open in browser)
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
+      - '127.0.0.1:5672:5672' # AMQP
+      - '127.0.0.1:15672:15672' # management UI
+    volumes: [rabbitmq-data:/var/lib/rabbitmq]
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 10
 
-# ── Named Volumes (data persists between restarts) ─────────
+  # ── Application services ─────────────────────────────────────
+  # Only the gateway publishes a port. Everything else is reachable solely
+  # on the internal `backend` network, by service name (Docker DNS).
+
+  gateway:
+    <<: *node-service
+    build: { context: ., args: { SERVICE: gateway } }
+    environment:
+      <<: *node-env
+      GATEWAY_PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      ORDER_SERVICE_URL: http://order-service:3001
+      INVENTORY_SERVICE_URL: http://inventory-service:3002
+      PAYMENT_SERVICE_URL: http://payment-service:3003
+    ports: ['3000:3000']
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/health/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      order-service: { condition: service_healthy }
+      inventory-service: { condition: service_healthy }
+      payment-service: { condition: service_healthy }
+
+  order-service:
+    <<: *node-service
+    build: { context: ., args: { SERVICE: order-service } }
+    environment:
+      <<: *node-env
+      ORDER_SERVICE_PORT: 3001
+      ORDER_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@order-db:5432/orderdb
+      INVENTORY_SERVICE_URL: http://inventory-service:3002
+      PAYMENT_SERVICE_URL: http://payment-service:3003
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3001/health/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      order-db: { condition: service_healthy }
+
+  inventory-service:
+    <<: *node-service
+    build: { context: ., args: { SERVICE: inventory-service } }
+    environment:
+      <<: *node-env
+      INVENTORY_SERVICE_PORT: 3002
+      INVENTORY_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@inventory-db:5432/inventorydb
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3002/health/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      inventory-db: { condition: service_healthy }
+
+  payment-service:
+    <<: *node-service
+    build: { context: ., args: { SERVICE: payment-service } }
+    environment:
+      <<: *node-env
+      PAYMENT_SERVICE_PORT: 3003
+      PAYMENT_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@payment-db:5432/paymentdb
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3003/health/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      payment-db: { condition: service_healthy }
+
+networks:
+  backend:
+
 volumes:
   order-db-data:
   inventory-db-data:

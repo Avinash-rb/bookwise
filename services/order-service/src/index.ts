@@ -1,33 +1,45 @@
-import Fastify from 'fastify'
-import dotenv from 'dotenv'
-
-dotenv.config({ path: '../../.env' })
-
+import path from 'node:path'
+import {
+  createApp,
+  createLogger,
+  createPool,
+  healthPlugin,
+  runMigrations,
+  startServer,
+} from '@bookwise/common'
+import { config } from './config'
 import orderRoutes from './routes/orders'
+import { createSaga } from './services/saga'
 
-const app = Fastify({
-  logger: {
-    level: 'info',
-    transport: { target: 'pino-pretty', options: { colorize: true } }
+async function main() {
+  const logger = createLogger({
+    service: 'order-service',
+    level: config.LOG_LEVEL,
+    pretty: config.NODE_ENV === 'development',
+  })
+  const pool = createPool(config.ORDER_DB_URL, logger, { application_name: 'order-service' })
+
+  if (config.RUN_MIGRATIONS) {
+    await runMigrations(pool, path.join(__dirname, '..', 'migrations'), logger)
   }
-})
 
-const start = async () => {
-  try {
-    await app.register(orderRoutes, { prefix: '/orders' })
+  const saga = createSaga({
+    pool,
+    logger,
+    inventoryUrl: config.INVENTORY_SERVICE_URL,
+    paymentUrl: config.PAYMENT_SERVICE_URL,
+  })
 
-    app.get('/health', async () => ({
-      status: 'ok',
-      service: 'order-service',
-      timestamp: new Date().toISOString()
-    }))
+  const app = createApp(logger)
+  app.addHook('onClose', () => pool.end())
 
-    await app.listen({ port: 3001, host: '0.0.0.0' })
-    console.log('📦 Order service running on http://localhost:3001')
-  } catch (err) {
-    app.log.error(err)
-    process.exit(1)
-  }
+  await app.register(healthPlugin, { checks: { postgres: () => pool.query('SELECT 1') } })
+  await app.register(orderRoutes, { prefix: '/orders', pool, saga })
+
+  await startServer(app, { port: config.ORDER_SERVICE_PORT, logger })
 }
 
-start()
+main().catch((err: unknown) => {
+  console.error('order-service failed to start', err)
+  process.exit(1)
+})

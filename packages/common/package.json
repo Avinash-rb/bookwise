@@ -1,0 +1,30 @@
+{
+  "name": "@bookwise/common",
+  "version": "1.0.0",
+  "description": "Shared building blocks for BookWise services: config, logging, errors, db, migrations, health, server bootstrap",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/type-provider-typebox": "^6.1.0",
+    "fastify": "^5.12.5",
+    "fastify-plugin": "^6.0.0",
+    "pg": "^8.23.1",
+    "pino": "^10.3.1",
+    "typebox": "^1.3.34",
+    "zod": "^4.6.5"
+  }
+}

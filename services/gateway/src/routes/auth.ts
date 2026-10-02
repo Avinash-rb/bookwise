@@ -1,50 +1,33 @@
-import { FastifyInstance } from 'fastify'
+import { unauthorized } from '@bookwise/common'
+import { type FastifyPluginAsyncTypebox, Type } from '@fastify/type-provider-typebox'
 
-// Temporary in-memory users — we'll move to DB on Day 4
+// Temporary in-memory users with plaintext passwords.
+// Day 2 replaces this with a real auth-service (users DB, argon2 hashes,
+// RS256 tokens, refresh-token rotation).
 const USERS: Record<string, { password: string; role: string }> = {
   'avinash@bookwise.com': { password: 'password123', role: 'user' },
-  'admin@bookwise.com':   { password: 'admin123',    role: 'admin' },
+  'admin@bookwise.com': { password: 'admin123', role: 'admin' },
 }
 
-export default async function authRoutes(app: FastifyInstance) {
+const LoginBody = Type.Object({
+  email: Type.String({ format: 'email' }),
+  password: Type.String({ minLength: 1, maxLength: 200 }),
+})
 
-  // POST /auth/login → returns JWT token
-  app.post('/auth/login', async (request, reply) => {
-    const { email, password } = request.body as { email: string; password: string }
+const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
+  // POST /auth/login → returns a JWT
+  app.post('/auth/login', { schema: { body: LoginBody } }, async (request) => {
+    const { email, password } = request.body
 
-    // Validate input
-    if (!email || !password) {
-      return reply.status(400).send({
-        statusCode: 400,
-        error: 'Bad Request',
-        message: 'Email and password are required'
-      })
-    }
-
-    // Check user exists and password matches
     const user = USERS[email]
-    if (!user || user.password !== password) {
-      return reply.status(401).send({
-        statusCode: 401,
-        error: 'Unauthorized',
-        message: 'Invalid email or password'
-      })
-    }
+    if (!user || user.password !== password) throw unauthorized('Invalid email or password')
 
-    // Sign JWT token — expires in 24 hours
-    const token = app.jwt.sign(
-      { email, role: user.role },
-      { expiresIn: '24h' }
-    )
-
-    return reply.status(200).send({ token, email, role: user.role })
+    const token = app.jwt.sign({ email, role: user.role }, { expiresIn: '24h' })
+    return { token, email, role: user.role }
   })
 
-  // GET /auth/me → returns logged-in user info (requires valid JWT)
-  app.get('/auth/me', {
-    preHandler: [app.authenticate]
-  }, async (request, reply) => {
-    // request.user is the decoded JWT payload (set by jwtVerify)
-    return request.user
-  })
+  // GET /auth/me → the logged-in user's token claims
+  app.get('/auth/me', { preHandler: [app.authenticate] }, async (request) => request.user)
 }
+
+export default authRoutes
