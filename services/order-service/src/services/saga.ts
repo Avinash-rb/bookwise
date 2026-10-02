@@ -11,8 +11,8 @@
 //   - Confirm failed? → Refund payment + Release seats
 //
 // NOTE: this is still the original synchronous, in-request orchestrator (only
-// dependency-injected and logged properly). Day 3 replaces it with a durable,
-// crash-safe background worker; Day 4 adds retries and a circuit breaker.
+// dependency-injected and logged properly). TODO: replace with a durable,
+// crash-safe background worker with retries and a circuit breaker.
 // ─────────────────────────────────────────────────────────────
 
 import { type Logger, type Pool, withTransaction } from '@bookwise/common'

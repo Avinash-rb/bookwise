@@ -11,7 +11,7 @@ const ProcessPaymentBody = Type.Object({
 
 const RefundBody = Type.Object({ order_id: Type.String({ format: 'uuid' }) })
 
-// NOTE: payment logic is unchanged from the original version; Day 4 replaces it
+// NOTE: payment logic is unchanged from the original version. TODO: replace it
 // with a race-free idempotency flow and a real (fake) payment provider.
 const paymentRoutes: FastifyPluginAsyncTypebox<{ pool: Pool }> = async (app, { pool }) => {
   // GET /payments/:id

@@ -1,11 +1,11 @@
 # BookWise — interview Q&A
 
 Questions an interviewer is likely to ask about this project, with answers that
-point at the actual code. Grows day by day as features land.
+point at the actual code. Grows as features land.
 
 ---
 
-## Day 1 — Foundation
+## Platform foundation
 
 ### "Walk me through how a service starts up."
 [services/order-service/src/index.ts](../services/order-service/src/index.ts)
@@ -86,7 +86,7 @@ HTTP calls (and the saga itself borrowed a second one). With `max: 10` connectio
   traffic. That's a cascading failure caused by one slow dependency.
 
 The rule: **never hold a DB connection (or a transaction and its locks) across a
-network call.** Commit, release, then call. Day 3 goes further: the saga moves out
+network call.** Commit, release, then call. The next step goes further: the saga moves out
 of the request entirely (202 Accepted + a background worker).
 
 ### "Why one Dockerfile for all services? What's in the final image?"

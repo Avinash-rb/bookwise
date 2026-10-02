@@ -2,7 +2,7 @@ import { unauthorized } from '@bookwise/common'
 import { type FastifyPluginAsyncTypebox, Type } from '@fastify/type-provider-typebox'
 
 // Temporary in-memory users with plaintext passwords.
-// Day 2 replaces this with a real auth-service (users DB, argon2 hashes,
+// TODO: replace with a dedicated auth-service (users DB, argon2 hashes,
 // RS256 tokens, refresh-token rotation).
 const USERS: Record<string, { password: string; role: string }> = {
   'avinash@bookwise.com': { password: 'password123', role: 'user' },

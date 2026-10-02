@@ -91,7 +91,7 @@ const showRoutes: FastifyPluginAsyncTypebox<{ pool: Pool }> = async (app, { pool
 
   // ═══════════════════════════════════════════════════════════
   // SAGA ENDPOINTS — called by the order service's orchestrator
-  // (reworked into idempotent /internal endpoints on Day 3)
+  // TODO: rework into idempotent /internal endpoints for the durable saga
   // ═══════════════════════════════════════════════════════════
 
   // POST /shows/:id/reserve — SAGA STEP 1: reserve seats

@@ -2,7 +2,7 @@ import rateLimit from '@fastify/rate-limit'
 import fp from 'fastify-plugin'
 
 // In-memory and per-instance for now: with 2 gateway replicas each one allows
-// the full quota. Day 2 replaces this with a Redis token bucket shared by all
+// the full quota. TODO: replace with a Redis token bucket shared by all
 // replicas.
 export default fp(
   async (app) => {

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import config from '../config'
 
-// KNOWN ISSUES (fixed on Day 2 with a proper upstream client):
+// KNOWN ISSUES (to be fixed with a proper upstream client):
 //  - /api/events* forward to inventory /events, which does not exist (inventory serves /movies, /shows)
 //  - no timeouts / circuit breaker; a down service turns into a 500 with a JSON parse error
 //  - the caller's identity is not forwarded, so services can't enforce ownership

@@ -38,7 +38,7 @@ const orderRoutes: FastifyPluginAsyncTypebox<{ pool: Pool; saga: Saga }> = async
   })
 
   // POST /orders — create the order (PENDING) and run the booking saga.
-  // Still synchronous for now; Day 3 turns this into 202 Accepted + a durable worker.
+  // Still synchronous for now. TODO: return 202 Accepted and run the saga in a durable worker.
   app.post('/', { schema: { body: CreateOrderBody } }, async (request, reply) => {
     const { customer_email, show_id, seat_ids, total_amount } = request.body
 
