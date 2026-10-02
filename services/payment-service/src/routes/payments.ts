@@ -1,104 +1,74 @@
-import { FastifyInstance } from 'fastify'
-import pool from '../db/client'
-import { ProcessPaymentBody } from '../types'
+import { notFound, type Pool, withTransaction } from '@bookwise/common'
+import { type FastifyPluginAsyncTypebox, Type } from '@fastify/type-provider-typebox'
 
-export default async function paymentRoutes(app: FastifyInstance) {
+const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) })
 
+const ProcessPaymentBody = Type.Object({
+  order_id: Type.String({ format: 'uuid' }),
+  amount: Type.Number({ exclusiveMinimum: 0 }),
+  idempotency_key: Type.String({ minLength: 1, maxLength: 255 }),
+})
+
+const RefundBody = Type.Object({ order_id: Type.String({ format: 'uuid' }) })
+
+// NOTE: payment logic is unchanged from the original version. TODO: replace it
+// with a race-free idempotency flow and a real (fake) payment provider.
+const paymentRoutes: FastifyPluginAsyncTypebox<{ pool: Pool }> = async (app, { pool }) => {
   // GET /payments/:id
-  app.get('/:id', async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const result = await pool.query(
-      'SELECT * FROM payments WHERE id = $1', [id]
-    )
-    if (result.rows.length === 0) {
-      return reply.status(404).send({ error: 'Payment not found' })
-    }
+  app.get('/:id', { schema: { params: IdParams } }, async (request) => {
+    const result = await pool.query('SELECT * FROM payments WHERE id = $1', [request.params.id])
+    if (result.rows.length === 0) throw notFound('Payment not found')
     return result.rows[0]
   })
 
   // POST /payments — process payment with idempotency
-  app.post('/', async (request, reply) => {
-    const { order_id, amount, idempotency_key } =
-      request.body as ProcessPaymentBody
+  app.post('/', { schema: { body: ProcessPaymentBody } }, async (request, reply) => {
+    const { order_id, amount, idempotency_key } = request.body
 
-    if (!order_id || !amount || !idempotency_key) {
-      return reply.status(400).send({
-        error: 'order_id, amount, idempotency_key required'
-      })
+    // If we've already processed this key, return the stored result (don't charge again)
+    const existing = await pool.query(
+      'SELECT status_code, response_body FROM idempotency_keys WHERE key = $1',
+      [idempotency_key],
+    )
+    if (existing.rows.length > 0) {
+      return reply.status(existing.rows[0].status_code).send(existing.rows[0].response_body)
     }
 
-    const client = await pool.connect()
-    try {
-      // ── Idempotency Check ──────────────────────────────────
-      // If we've already processed this key, return stored result
-      const existing = await client.query(
-        'SELECT * FROM idempotency_keys WHERE key = $1',
-        [idempotency_key]
-      )
-
-      if (existing.rows.length > 0) {
-        // Already processed — return original response (don't charge again!)
-        return reply
-          .status(existing.rows[0].status_code)
-          .send(existing.rows[0].response_body)
-      }
-      // ──────────────────────────────────────────────────────
-
-      await client.query('BEGIN')
-
-      // Simulate payment processing
-      // In production: call Razorpay/Stripe API here
-      const success = Math.random() > 0.1  // 90% success rate (10% simulate failure)
-      const status = success ? 'COMPLETED' : 'FAILED'
-      const providerRef = success ? `PAY_${Date.now()}` : null
-
+    const { statusCode, payment } = await withTransaction(pool, async (client) => {
+      // Simulated payment provider: 90% success rate
+      const success = Math.random() > 0.1
       const paymentResult = await client.query(
         `INSERT INTO payments (order_id, amount, status, provider_reference)
          VALUES ($1, $2, $3, $4)
          RETURNING *`,
-        [order_id, amount, status, providerRef]
+        [order_id, amount, success ? 'COMPLETED' : 'FAILED', success ? `PAY_${Date.now()}` : null],
       )
-      const payment = paymentResult.rows[0]
-
-      // Store in idempotency table
-      const responseBody = payment
-      const statusCode = success ? 201 : 402
+      const created = paymentResult.rows[0]
+      const code = success ? 201 : 402
 
       await client.query(
         `INSERT INTO idempotency_keys (key, response_body, status_code)
          VALUES ($1, $2, $3)`,
-        [idempotency_key, JSON.stringify(responseBody), statusCode]
+        [idempotency_key, JSON.stringify(created), code],
       )
+      return { statusCode: code, payment: created }
+    })
 
-      await client.query('COMMIT')
-      return reply.status(statusCode).send(responseBody)
-
-    } catch (err) {
-      await client.query('ROLLBACK')
-      throw err
-    } finally {
-      client.release()
-    }
+    return reply.status(statusCode).send(payment)
   })
 
-  // POST /payments/refund — refund a payment (compensation in saga)
-  app.post('/refund', async (request, reply) => {
-    const { order_id } = request.body as { order_id: string }
-
+  // POST /payments/refund — refund a payment (saga compensation)
+  app.post('/refund', { schema: { body: RefundBody } }, async (request) => {
     const result = await pool.query(
       `UPDATE payments
-       SET status = 'REFUNDED', updated_at = NOW()
+       SET status = 'REFUNDED', updated_at = now()
        WHERE order_id = $1 AND status = 'COMPLETED'
        RETURNING *`,
-      [order_id]
+      [request.body.order_id],
     )
-
-    if (result.rows.length === 0) {
-      return reply.status(404).send({
-        error: 'No completed payment found for this order'
-      })
-    }
-
+    if (result.rows.length === 0) throw notFound('No completed payment found for this order')
     return { message: 'Refund processed', payment: result.rows[0] }
   })
 }
+
+export default paymentRoutes

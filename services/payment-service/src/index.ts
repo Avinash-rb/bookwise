@@ -1,33 +1,37 @@
-import Fastify from 'fastify'
-import dotenv from 'dotenv'
-
-dotenv.config({ path: '../../.env' })
-
+import path from 'node:path'
+import {
+  createApp,
+  createLogger,
+  createPool,
+  healthPlugin,
+  runMigrations,
+  startServer,
+} from '@bookwise/common'
+import { config } from './config'
 import paymentRoutes from './routes/payments'
 
-const app = Fastify({
-  logger: {
-    level: 'info',
-    transport: { target: 'pino-pretty', options: { colorize: true } }
+async function main() {
+  const logger = createLogger({
+    service: 'payment-service',
+    level: config.LOG_LEVEL,
+    pretty: config.NODE_ENV === 'development',
+  })
+  const pool = createPool(config.PAYMENT_DB_URL, logger, { application_name: 'payment-service' })
+
+  if (config.RUN_MIGRATIONS) {
+    await runMigrations(pool, path.join(__dirname, '..', 'migrations'), logger)
   }
-})
 
-const start = async () => {
-  try {
-    await app.register(paymentRoutes, { prefix: '/payments' })
+  const app = createApp(logger)
+  app.addHook('onClose', () => pool.end())
 
-    app.get('/health', async () => ({
-      status: 'ok',
-      service: 'payment-service',
-      timestamp: new Date().toISOString()
-    }))
+  await app.register(healthPlugin, { checks: { postgres: () => pool.query('SELECT 1') } })
+  await app.register(paymentRoutes, { prefix: '/payments', pool })
 
-    await app.listen({ port: 3003, host: '0.0.0.0' })
-    console.log('💳 Payment service running on http://localhost:3003')
-  } catch (err) {
-    app.log.error(err)
-    process.exit(1)
-  }
+  await startServer(app, { port: config.PAYMENT_SERVICE_PORT, logger })
 }
 
-start()
+main().catch((err: unknown) => {
+  console.error('payment-service failed to start', err)
+  process.exit(1)
+})

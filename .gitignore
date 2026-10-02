@@ -29,3 +29,6 @@ docker-compose.override.yml
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Personal interview-prep notes (kept private)
+docs/notes/

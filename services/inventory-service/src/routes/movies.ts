@@ -1,45 +1,32 @@
-import { FastifyInstance } from 'fastify'
-import pool from '../db/client'
-import { CreateMovieBody } from '../types'
+import { notFound, type Pool } from '@bookwise/common'
+import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
+import { CreateMovieBody, IdParams } from '../schemas'
 
-export default async function movieRoutes(app: FastifyInstance) {
-
+const movieRoutes: FastifyPluginAsyncTypebox<{ pool: Pool }> = async (app, { pool }) => {
   // GET /movies — list all movies
-  app.get('/', async (request, reply) => {
-    const result = await pool.query(
-      'SELECT * FROM movies ORDER BY created_at DESC'
-    )
+  app.get('/', async () => {
+    const result = await pool.query('SELECT * FROM movies ORDER BY created_at DESC')
     return result.rows
   })
 
   // GET /movies/:id — get single movie
-  app.get('/:id', async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const result = await pool.query(
-      'SELECT * FROM movies WHERE id = $1',
-      [id]
-    )
-    if (result.rows.length === 0) {
-      return reply.status(404).send({ error: 'Movie not found' })
-    }
+  app.get('/:id', { schema: { params: IdParams } }, async (request) => {
+    const result = await pool.query('SELECT * FROM movies WHERE id = $1', [request.params.id])
+    if (result.rows.length === 0) throw notFound('Movie not found')
     return result.rows[0]
   })
 
   // POST /movies — create movie
-  app.post('/', async (request, reply) => {
-    const { title, duration_mins, language = 'English', genre, rating } =
-      request.body as CreateMovieBody
-
-    if (!title || !duration_mins) {
-      return reply.status(400).send({ error: 'title and duration_mins are required' })
-    }
-
+  app.post('/', { schema: { body: CreateMovieBody } }, async (request, reply) => {
+    const { title, duration_mins, language = 'English', genre, rating } = request.body
     const result = await pool.query(
       `INSERT INTO movies (title, duration_mins, language, genre, rating)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [title, duration_mins, language, genre, rating]
+      [title, duration_mins, language, genre ?? null, rating ?? null],
     )
     return reply.status(201).send(result.rows[0])
   })
 }
+
+export default movieRoutes

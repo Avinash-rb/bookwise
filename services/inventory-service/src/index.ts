@@ -1,38 +1,41 @@
-import Fastify from 'fastify'
-import dotenv from 'dotenv'
-
-dotenv.config({ path: '../../.env' })
-
+import path from 'node:path'
+import {
+  createApp,
+  createLogger,
+  createPool,
+  healthPlugin,
+  runMigrations,
+  startServer,
+} from '@bookwise/common'
+import { config } from './config'
 import movieRoutes from './routes/movies'
-import theatreRoutes from './routes/theatres'
 import showRoutes from './routes/shows'
+import theatreRoutes from './routes/theatres'
 
-const app = Fastify({
-  logger: {
-    level: 'info',
-    transport: { target: 'pino-pretty', options: { colorize: true } }
+async function main() {
+  const logger = createLogger({
+    service: 'inventory-service',
+    level: config.LOG_LEVEL,
+    pretty: config.NODE_ENV === 'development',
+  })
+  const pool = createPool(config.INVENTORY_DB_URL, logger, { application_name: 'inventory-service' })
+
+  if (config.RUN_MIGRATIONS) {
+    await runMigrations(pool, path.join(__dirname, '..', 'migrations'), logger)
   }
-})
 
-const start = async () => {
-  try {
-    await app.register(movieRoutes, { prefix: '/movies' })
-    await app.register(theatreRoutes, { prefix: '/theatres' })
-    await app.register(showRoutes, { prefix: '/shows' })
+  const app = createApp(logger)
+  app.addHook('onClose', () => pool.end())
 
-    // Health check
-    app.get('/health', async () => ({
-      status: 'ok',
-      service: 'inventory-service',
-      timestamp: new Date().toISOString()
-    }))
+  await app.register(healthPlugin, { checks: { postgres: () => pool.query('SELECT 1') } })
+  await app.register(movieRoutes, { prefix: '/movies', pool })
+  await app.register(theatreRoutes, { prefix: '/theatres', pool })
+  await app.register(showRoutes, { prefix: '/shows', pool })
 
-    await app.listen({ port: 3002, host: '0.0.0.0' })
-    console.log('🎬 Inventory service running on http://localhost:3002')
-  } catch (err) {
-    app.log.error(err)
-    process.exit(1)
-  }
+  await startServer(app, { port: config.INVENTORY_SERVICE_PORT, logger })
 }
 
-start()
+main().catch((err: unknown) => {
+  console.error('inventory-service failed to start', err)
+  process.exit(1)
+})

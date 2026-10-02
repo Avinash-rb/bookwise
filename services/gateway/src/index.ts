@@ -1,44 +1,31 @@
-import Fastify from 'fastify'
+import { createApp, createLogger, healthPlugin, startServer } from '@bookwise/common'
 import config from './config'
-
-// Import plugins
 import jwtPlugin from './plugins/jwt'
 import rateLimitPlugin from './plugins/rateLimit'
-
-// Import routes
-import healthRoutes from './routes/health'
 import authRoutes from './routes/auth'
 import proxyRoutes from './routes/proxy'
 
-// ── Bootstrap ──────────────────────────────────────────────
-const app = Fastify({
-  logger: {
-    level: config.nodeEnv === 'development' ? 'info' : 'warn',
-    transport: config.nodeEnv === 'development'
-      ? { target: 'pino-pretty', options: { colorize: true } }
-      : undefined
-  }
-})
+async function main() {
+  const logger = createLogger({
+    service: 'gateway',
+    level: config.logLevel,
+    pretty: config.nodeEnv === 'development',
+  })
+  const app = createApp(logger)
 
-const start = async () => {
-  try {
-    // Register plugins (order matters — rate limit before JWT)
-    await app.register(rateLimitPlugin)
-    await app.register(jwtPlugin)
+  // Order matters: rate limiting runs before JWT verification so a flood of
+  // requests with garbage tokens is rejected cheaply.
+  await app.register(rateLimitPlugin)
+  await app.register(jwtPlugin)
 
-    // Register routes
-    await app.register(healthRoutes)
-    await app.register(authRoutes)
-    await app.register(proxyRoutes)
+  await app.register(healthPlugin)
+  await app.register(authRoutes)
+  await app.register(proxyRoutes)
 
-    // Start server
-    await app.listen({ port: config.port, host: '0.0.0.0' })
-    console.log(`🚀 Gateway running on http://localhost:${config.port}`)
-
-  } catch (err) {
-    app.log.error(err)
-    process.exit(1)
-  }
+  await startServer(app, { port: config.port, logger })
 }
 
-start()
+main().catch((err: unknown) => {
+  console.error('gateway failed to start', err)
+  process.exit(1)
+})
