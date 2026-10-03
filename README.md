@@ -6,13 +6,14 @@ Theatres (vendors) list shows; customers book seats through a saga that spans th
 order, inventory and payment services, each with its own database.
 
 > Work in progress. The full architecture write-up, diagrams and load-test numbers
-> are added at the end of the build. Design Q&A: [docs/INTERVIEW.md](docs/INTERVIEW.md).
+> are added at the end of the build.
 
 ## Services
 
 | Service | Port | Owns | Responsibility |
 |---|---|---|---|
 | gateway | 3000 (public) | — | JWT auth, rate limiting, routing |
+| auth-service | 3004 (internal) | auth DB | Accounts, password hashing, access + refresh tokens (RS256), JWKS |
 | order-service | 3001 (internal) | orders DB | Orders + saga orchestration |
 | inventory-service | 3002 (internal) | inventory DB | Theatres, screens, movies, shows, seat availability |
 | payment-service | 3003 (internal) | payments DB | Payments, idempotency, refunds |
@@ -36,6 +37,7 @@ Prerequisites: Node.js 22.12+, Docker Desktop.
 ```bash
 cp .env.example .env          # then set JWT_SECRET to a long random string
 npm install
+npm run keys:generate         # RSA key pair for signing access tokens (written to secrets/, git-ignored)
 
 # Option A: everything in Docker
 docker compose up --build -d
