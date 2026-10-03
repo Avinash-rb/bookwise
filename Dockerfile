@@ -18,6 +18,7 @@ COPY services/gateway/package.json services/gateway/
 COPY services/order-service/package.json services/order-service/
 COPY services/inventory-service/package.json services/inventory-service/
 COPY services/payment-service/package.json services/payment-service/
+COPY services/auth-service/package.json services/auth-service/
 
 # ── build: full install, compile common + the selected service ─
 FROM base AS build

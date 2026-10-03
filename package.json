@@ -18,9 +18,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate": "npm run migrate --workspaces --if-present",
-    "infra:up": "docker compose up -d order-db inventory-db payment-db redis rabbitmq",
+    "infra:up": "docker compose up -d auth-db order-db inventory-db payment-db redis rabbitmq",
     "up": "docker compose up --build -d",
-    "down": "docker compose down"
+    "down": "docker compose down",
+    "keys:generate": "node scripts/generate-jwt-keys.mjs"
   },
   "keywords": [],
   "author": "Avinash Birajdar",

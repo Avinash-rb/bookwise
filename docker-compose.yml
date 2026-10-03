@@ -27,6 +27,16 @@ services:
   # Host ports are bound to 127.0.0.1 only: reachable for local development
   # (`npm run dev` + a DB GUI) but not from other machines on the network.
 
+  auth-db:
+    <<: *postgres
+    container_name: bookwise-auth-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: *db-password
+      POSTGRES_DB: authdb
+    ports: ['127.0.0.1:5435:5432']
+    volumes: [auth-db-data:/var/lib/postgresql/data]
+
   order-db:
     <<: *postgres
     container_name: bookwise-order-db
@@ -114,6 +124,28 @@ services:
       inventory-service: { condition: service_healthy }
       payment-service: { condition: service_healthy }
 
+  auth-service:
+    <<: *node-service
+    build: { context: ., args: { SERVICE: auth-service } }
+    environment:
+      <<: *node-env
+      AUTH_SERVICE_PORT: 3004
+      AUTH_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@auth-db:5432/authdb
+      # Docker secret: mounted read-only as a file, not exposed as an env var
+      # (env vars leak easily via `docker inspect`, crash dumps and child processes).
+      JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private_key
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    secrets: [jwt_private_key]
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3004/health/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      auth-db: { condition: service_healthy }
+
   order-service:
     <<: *node-service
     build: { context: ., args: { SERVICE: order-service } }
@@ -167,7 +199,12 @@ services:
 networks:
   backend:
 
+secrets:
+  jwt_private_key:
+    file: ./secrets/jwt-private.pem # created by `npm run keys:generate`
+
 volumes:
+  auth-db-data:
   order-db-data:
   inventory-db-data:
   payment-db-data:
