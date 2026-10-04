@@ -108,10 +108,17 @@ services:
     environment:
       <<: *node-env
       GATEWAY_PORT: 3000
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      # Only the PUBLIC key: the gateway can verify tokens but never sign them.
+      # Not secret, but mounted the same way as the private key for consistency.
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
+      REDIS_URL: redis://redis:6379
+      AUTH_SERVICE_URL: http://auth-service:3004
       ORDER_SERVICE_URL: http://order-service:3001
       INVENTORY_SERVICE_URL: http://inventory-service:3002
-      PAYMENT_SERVICE_URL: http://payment-service:3003
+      # No payment-service URL: payments are triggered only by the order saga,
+      # never directly by a client.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    secrets: [jwt_public_key]
     ports: ['3000:3000']
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/health/ready']
@@ -120,9 +127,10 @@ services:
       retries: 3
       start_period: 15s
     depends_on:
+      redis: { condition: service_healthy }
+      auth-service: { condition: service_healthy }
       order-service: { condition: service_healthy }
       inventory-service: { condition: service_healthy }
-      payment-service: { condition: service_healthy }
 
   auth-service:
     <<: *node-service
@@ -202,6 +210,8 @@ networks:
 secrets:
   jwt_private_key:
     file: ./secrets/jwt-private.pem # created by `npm run keys:generate`
+  jwt_public_key:
+    file: ./secrets/jwt-public.pem
 
 volumes:
   auth-db-data:

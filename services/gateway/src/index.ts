@@ -1,9 +1,11 @@
 import { createApp, createLogger, healthPlugin, startServer } from '@bookwise/common'
 import config from './config'
-import jwtPlugin from './plugins/jwt'
+import authPlugin from './plugins/auth'
 import rateLimitPlugin from './plugins/rateLimit'
-import authRoutes from './routes/auth'
-import proxyRoutes from './routes/proxy'
+import redisPlugin from './plugins/redis'
+import securityPlugin from './plugins/security'
+import { createForwarder } from './proxy'
+import apiRoutes from './routes/api'
 
 async function main() {
   const logger = createLogger({
@@ -13,14 +15,23 @@ async function main() {
   })
   const app = createApp(logger)
 
-  // Order matters: rate limiting runs before JWT verification so a flood of
-  // requests with garbage tokens is rejected cheaply.
+  // First, so even rate-limited and error responses carry the security and
+  // CORS headers (otherwise the browser hides a 429 from the frontend).
+  await app.register(securityPlugin, { corsOrigins: config.corsOrigins })
+  await app.register(redisPlugin, { url: config.redisUrl })
+  // Rate limiting registers its global hook first, so a flood of requests is
+  // rejected before any token verification work is done.
   await app.register(rateLimitPlugin)
-  await app.register(jwtPlugin)
+  await app.register(authPlugin, config.jwt)
 
-  await app.register(healthPlugin)
-  await app.register(authRoutes)
-  await app.register(proxyRoutes)
+  // The gateway is "ready" when Redis is reachable: without it, it can neither
+  // check revoked tokens nor rate-limit. Upstream services are deliberately
+  // NOT checked: one service being down shouldn't take the whole gateway out
+  // of the load balancer (it answers 503 for that service's routes instead).
+  await app.register(healthPlugin, { checks: { redis: () => app.redis.ping() } })
+  await app.register(apiRoutes, {
+    forward: createForwarder({ services: config.services, timeoutMs: config.upstreamTimeoutMs }),
+  })
 
   await startServer(app, { port: config.port, logger })
 }
