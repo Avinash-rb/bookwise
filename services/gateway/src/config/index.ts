@@ -1,28 +1,44 @@
+import { readFileSync } from 'node:fs'
 import { baseEnvSchema, loadConfig, port } from '@bookwise/common'
 import { z } from 'zod'
 
 const env = loadConfig(
   baseEnvSchema.extend({
     GATEWAY_PORT: port(3000),
-    // No fallback: a gateway that silently signs tokens with a well-known
-    // default secret is a gateway anyone can forge tokens for.
-    JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+    // The gateway only holds the PUBLIC key: it can verify tokens but never
+    // mint them. The private key stays inside auth-service.
+    JWT_PUBLIC_KEY_FILE: z.string().min(1),
+    JWT_ISSUER: z.string().default('bookwise-auth'),
+    JWT_AUDIENCE: z.string().default('bookwise'),
+    REDIS_URL: z.url().default('redis://localhost:6379'),
+    AUTH_SERVICE_URL: z.url().default('http://localhost:3004'),
     ORDER_SERVICE_URL: z.url().default('http://localhost:3001'),
     INVENTORY_SERVICE_URL: z.url().default('http://localhost:3002'),
-    PAYMENT_SERVICE_URL: z.url().default('http://localhost:3003'),
+    // How long the gateway waits for a service before answering 504.
+    UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   }),
 )
 
 const config = {
   port: env.GATEWAY_PORT,
-  jwtSecret: env.JWT_SECRET,
   nodeEnv: env.NODE_ENV,
   logLevel: env.LOG_LEVEL,
+  jwt: {
+    // Read once at startup: a missing key file should stop the gateway from
+    // booting, not fail on the first request.
+    publicKeyPem: readFileSync(env.JWT_PUBLIC_KEY_FILE, 'utf8'),
+    issuer: env.JWT_ISSUER,
+    audience: env.JWT_AUDIENCE,
+  },
+  redisUrl: env.REDIS_URL,
+  upstreamTimeoutMs: env.UPSTREAM_TIMEOUT_MS,
   services: {
+    auth: env.AUTH_SERVICE_URL,
     order: env.ORDER_SERVICE_URL,
     inventory: env.INVENTORY_SERVICE_URL,
-    payment: env.PAYMENT_SERVICE_URL,
   },
 }
+
+export type Upstream = keyof typeof config.services
 
 export default config

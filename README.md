@@ -12,7 +12,7 @@ order, inventory and payment services, each with its own database.
 
 | Service | Port | Owns | Responsibility |
 |---|---|---|---|
-| gateway | 3000 (public) | — | JWT auth, rate limiting, routing |
+| gateway | 3000 (public) | Redis (rate limits, token denylist) | Verifies tokens (public key), role checks, Redis rate limiting, routing |
 | auth-service | 3004 (internal) | auth DB | Accounts, password hashing, access + refresh tokens (RS256), JWKS |
 | order-service | 3001 (internal) | orders DB | Orders + saga orchestration |
 | inventory-service | 3002 (internal) | inventory DB | Theatres, screens, movies, shows, seat availability |
@@ -35,7 +35,7 @@ docker-compose.yml  full local stack
 Prerequisites: Node.js 22.12+, Docker Desktop.
 
 ```bash
-cp .env.example .env          # then set JWT_SECRET to a long random string
+cp .env.example .env
 npm install
 npm run keys:generate         # RSA key pair for signing access tokens (written to secrets/, git-ignored)
 

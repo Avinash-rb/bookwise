@@ -24,6 +24,8 @@ export const forbidden = (message = 'You do not have access to this resource') =
 export const notFound = (message = 'Resource not found') => new AppError(404, 'NOT_FOUND', message)
 export const conflict = (message: string, details?: unknown) =>
   new AppError(409, 'CONFLICT', message, details)
+export const serviceUnavailable = (message = 'Service temporarily unavailable') =>
+  new AppError(503, 'SERVICE_UNAVAILABLE', message)
 
 export interface ErrorBody {
   statusCode: number
