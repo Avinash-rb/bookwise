@@ -6,11 +6,13 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import fp from 'fastify-plugin'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import authPlugin, { bearerToken, denylistKey } from './plugins/auth'
+import securityPlugin from './plugins/security'
 import { createForwarder } from './proxy'
 import apiRoutes from './routes/api'
 
 const ISSUER = 'bookwise-auth'
 const AUDIENCE = 'bookwise'
+const APP_ORIGIN = 'http://localhost:5173'
 
 const keys = generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -54,7 +56,10 @@ let upstreamUrl: string
 
 beforeAll(async () => {
   // A fake upstream that echoes back exactly what the gateway sent it.
-  upstream = Fastify()
+  // forceCloseConnections: the /slow test leaves a request running after the
+  // gateway gave up on it; without this, close() would wait for that
+  // connection's keep-alive to time out.
+  upstream = Fastify({ forceCloseConnections: true })
   upstream.get('/slow', async () => new Promise((resolve) => setTimeout(() => resolve({}), 500)))
   upstream.get('/html', async (_request, reply) => reply.type('text/html').send('<h1>oops</h1>'))
   upstream.all('/*', async (request) => ({
@@ -66,6 +71,7 @@ beforeAll(async () => {
   upstreamUrl = await upstream.listen({ port: 0, host: '127.0.0.1' })
 
   gateway = createApp(createLogger({ service: 'gateway-test', level: 'silent' }))
+  await gateway.register(securityPlugin, { corsOrigins: [APP_ORIGIN] })
   await gateway.register(fakeRedis)
   await gateway.register(authPlugin, { publicKeyPem: keys.publicKey, issuer: ISSUER, audience: AUDIENCE })
   await gateway.register(apiRoutes, {
@@ -342,5 +348,49 @@ describe('upstream failures', () => {
     const res = await forwardTo(all(upstreamUrl), '/html')
     expect(res.statusCode).toBe(502)
     expect(res.json()).toMatchObject({ code: 'BAD_GATEWAY' })
+  })
+})
+
+describe('browser security (CORS + helmet)', () => {
+  const preflight = (origin: string) =>
+    gateway.inject({
+      method: 'OPTIONS',
+      url: '/api/orders',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization, content-type',
+      },
+    })
+
+  it('allows the frontend origin and lists what it may send and read', async () => {
+    const res = await preflight(APP_ORIGIN)
+    expect(res.statusCode).toBe(204)
+    expect(res.headers['access-control-allow-origin']).toBe(APP_ORIGIN)
+    expect(res.headers['access-control-allow-headers']).toContain('authorization')
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined()
+  })
+
+  it('gives an unknown origin no CORS permission (the browser then blocks it)', async () => {
+    const res = await preflight('https://evil.example')
+    expect(res.headers['access-control-allow-origin']).toBeUndefined()
+  })
+
+  it('lets the frontend read the request id and rate-limit headers', async () => {
+    const res = await gateway.inject({ method: 'GET', url: '/api/movies', headers: { origin: APP_ORIGIN } })
+    expect(res.headers['access-control-expose-headers']).toContain('x-request-id')
+    expect(res.headers['access-control-expose-headers']).toContain('retry-after')
+  })
+
+  it('sets security headers on every response, errors included', async () => {
+    for (const res of [
+      await gateway.inject({ method: 'GET', url: '/api/movies' }),
+      await gateway.inject({ method: 'GET', url: '/api/orders' }), // 401
+      await gateway.inject({ method: 'GET', url: '/nope' }), // 404
+    ]) {
+      expect(res.headers['x-content-type-options']).toBe('nosniff')
+      expect(res.headers['content-security-policy']).toBe("default-src 'none';frame-ancestors 'none'")
+      expect(res.headers['strict-transport-security']).toBeDefined()
+    }
   })
 })

@@ -117,6 +117,7 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:3002
       # No payment-service URL: payments are triggered only by the order saga,
       # never directly by a client.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     secrets: [jwt_public_key]
     ports: ['3000:3000']
     healthcheck:

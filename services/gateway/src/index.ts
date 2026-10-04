@@ -3,6 +3,7 @@ import config from './config'
 import authPlugin from './plugins/auth'
 import rateLimitPlugin from './plugins/rateLimit'
 import redisPlugin from './plugins/redis'
+import securityPlugin from './plugins/security'
 import { createForwarder } from './proxy'
 import apiRoutes from './routes/api'
 
@@ -14,6 +15,9 @@ async function main() {
   })
   const app = createApp(logger)
 
+  // First, so even rate-limited and error responses carry the security and
+  // CORS headers (otherwise the browser hides a 429 from the frontend).
+  await app.register(securityPlugin, { corsOrigins: config.corsOrigins })
   await app.register(redisPlugin, { url: config.redisUrl })
   // Rate limiting registers its global hook first, so a flood of requests is
   // rejected before any token verification work is done.

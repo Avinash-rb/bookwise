@@ -16,6 +16,17 @@ const env = loadConfig(
     INVENTORY_SERVICE_URL: z.url().default('http://localhost:3002'),
     // How long the gateway waits for a service before answering 504.
     UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+    // Comma-separated browser origins allowed by CORS (the Vite dev server by default).
+    CORS_ORIGINS: z
+      .string()
+      .default('http://localhost:5173')
+      .transform((value) =>
+        value
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.url())),
   }),
 )
 
@@ -32,6 +43,7 @@ const config = {
   },
   redisUrl: env.REDIS_URL,
   upstreamTimeoutMs: env.UPSTREAM_TIMEOUT_MS,
+  corsOrigins: env.CORS_ORIGINS,
   services: {
     auth: env.AUTH_SERVICE_URL,
     order: env.ORDER_SERVICE_URL,
