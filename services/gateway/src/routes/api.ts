@@ -34,18 +34,19 @@ const ROUTES: RouteSpec[] = [
   { method: 'GET', url: '/api/shows', upstream: 'inventory', path: '/shows', access: 'public' },
   { method: 'GET', url: '/api/shows/:id/seats', upstream: 'inventory', path: '/shows/:id/seats', access: 'public' },
 
-  // ── Platform catalogue: admins curate movies ──
-  { method: 'POST', url: '/api/movies', upstream: 'inventory', path: '/movies', access: ['admin'] },
+  // ── Admin: the platform curates the movie catalogue ──
+  { method: 'POST', url: '/api/admin/movies', upstream: 'inventory', path: '/admin/movies', access: ['admin'] },
 
   // ── Vendors run theatres (inventory-service checks they own the theatre) ──
-  { method: 'POST', url: '/api/theatres', upstream: 'inventory', path: '/theatres', access: ['vendor'] },
-  { method: 'POST', url: '/api/theatres/:id/screens', upstream: 'inventory', path: '/theatres/:id/screens', access: ['vendor', 'admin'] },
-  { method: 'POST', url: '/api/shows', upstream: 'inventory', path: '/shows', access: ['vendor', 'admin'] },
+  { method: 'GET', url: '/api/vendor/theatres', upstream: 'inventory', path: '/vendor/theatres', access: ['vendor', 'admin'] },
+  { method: 'POST', url: '/api/vendor/theatres', upstream: 'inventory', path: '/vendor/theatres', access: ['vendor'] },
+  { method: 'POST', url: '/api/vendor/theatres/:id/screens', upstream: 'inventory', path: '/vendor/theatres/:id/screens', access: ['vendor', 'admin'] },
+  { method: 'POST', url: '/api/vendor/shows', upstream: 'inventory', path: '/vendor/shows', access: ['vendor', 'admin'] },
 
   // ── Orders (order-service checks the order belongs to the caller) ──
   { method: 'POST', url: '/api/orders', upstream: 'order', path: '/orders', access: ['customer'], limit: 'booking' },
-  { method: 'GET', url: '/api/orders', upstream: 'order', path: '/orders', access: ANYONE_LOGGED_IN },
-  { method: 'GET', url: '/api/orders/:id', upstream: 'order', path: '/orders/:id', access: ANYONE_LOGGED_IN },
+  { method: 'GET', url: '/api/orders', upstream: 'order', path: '/orders', access: ['customer', 'admin'] },
+  { method: 'GET', url: '/api/orders/:id', upstream: 'order', path: '/orders/:id', access: ['customer', 'admin'] },
 ]
 
 // Path ids are validated as UUIDs HERE, before they are put into the upstream

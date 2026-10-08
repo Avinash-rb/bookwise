@@ -8,9 +8,11 @@ import {
   startServer,
 } from '@bookwise/common'
 import { config } from './config'
+import adminRoutes from './routes/admin'
 import movieRoutes from './routes/movies'
 import showRoutes from './routes/shows'
 import theatreRoutes from './routes/theatres'
+import vendorRoutes from './routes/vendor'
 
 async function main() {
   const logger = createLogger({
@@ -31,6 +33,9 @@ async function main() {
   await app.register(movieRoutes, { prefix: '/movies', pool })
   await app.register(theatreRoutes, { prefix: '/theatres', pool })
   await app.register(showRoutes, { prefix: '/shows', pool })
+  // Writes, grouped by who may do them (each group checks the role itself).
+  await app.register(vendorRoutes, { prefix: '/vendor', pool })
+  await app.register(adminRoutes, { prefix: '/admin', pool })
 
   await startServer(app, { port: config.INVENTORY_SERVICE_PORT, logger })
 }
