@@ -42,6 +42,7 @@ npm run keys:generate         # RSA key pair for signing access tokens (written 
 # Option A: everything in Docker
 docker compose up --build -d
 curl http://localhost:3000/health/ready
+node --env-file=.env scripts/demo.mjs   # end-to-end demo: vendor sets up a show, customer books
 
 # Option B: infrastructure in Docker, services on your machine (hot reload)
 npm run infra:up
