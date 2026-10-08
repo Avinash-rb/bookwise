@@ -1,13 +1,6 @@
 import { conflict, notFound, type Pool, withTransaction } from '@bookwise/common'
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
-import {
-  CreateShowBody,
-  IdParams,
-  ListShowsQuery,
-  OrderRefBody,
-  ReserveSeatsBody,
-  SeatMapResponse,
-} from '../schemas'
+import { IdParams, ListShowsQuery, OrderRefBody, ReserveSeatsBody, SeatMapResponse } from '../schemas'
 
 const SHOW_LIST_SQL = `
   SELECT s.*, m.title AS movie_title, m.duration_mins,
@@ -25,35 +18,6 @@ const showRoutes: FastifyPluginAsyncTypebox<{ pool: Pool }> = async (app, { pool
       ? await pool.query(`${SHOW_LIST_SQL} WHERE s.movie_id = $1 ORDER BY s.start_time`, [movieId])
       : await pool.query(`${SHOW_LIST_SQL} ORDER BY s.start_time`)
     return result.rows
-  })
-
-  // POST /shows — create a show and one show_seats row per seat in the screen
-  app.post('/', { schema: { body: CreateShowBody } }, async (request, reply) => {
-    const { movie_id, screen_id, start_time, price } = request.body
-
-    const show = await withTransaction(pool, async (client) => {
-      const movie = await client.query('SELECT duration_mins FROM movies WHERE id = $1', [movie_id])
-      if (movie.rows.length === 0) throw notFound('Movie not found')
-
-      const startDate = new Date(start_time)
-      const endDate = new Date(startDate.getTime() + movie.rows[0].duration_mins * 60_000)
-
-      const showResult = await client.query(
-        `INSERT INTO shows (movie_id, screen_id, start_time, end_time, price)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [movie_id, screen_id, startDate, endDate, price],
-      )
-      const created = showResult.rows[0]
-
-      await client.query(
-        `INSERT INTO show_seats (show_id, seat_id, status)
-         SELECT $1, id, 'AVAILABLE' FROM seats WHERE screen_id = $2`,
-        [created.id, screen_id],
-      )
-      return created
-    })
-
-    return reply.status(201).send(show)
   })
 
   // GET /shows/:id/seats — seat availability for a show

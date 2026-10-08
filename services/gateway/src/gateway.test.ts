@@ -257,7 +257,7 @@ describe('authorization (roles)', () => {
   const createMovie = (role: 'customer' | 'vendor' | 'admin') =>
     gateway.inject({
       method: 'POST',
-      url: '/api/movies',
+      url: '/api/admin/movies',
       headers: { authorization: `Bearer ${tokenFor(role)}` },
       payload: { title: 'Dune' },
     })
@@ -270,7 +270,25 @@ describe('authorization (roles)', () => {
   it('forwards when the role is allowed, including the JSON body', async () => {
     const res = await createMovie('admin')
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toMatchObject({ method: 'POST', url: '/movies', body: { title: 'Dune' } })
+    expect(res.json()).toMatchObject({ method: 'POST', url: '/admin/movies', body: { title: 'Dune' } })
+  })
+
+  it('keeps vendor routes away from customers', async () => {
+    const res = await gateway.inject({
+      method: 'GET',
+      url: '/api/vendor/theatres',
+      headers: { authorization: `Bearer ${tokenFor('customer')}` },
+    })
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('no longer exposes the old write routes outside /vendor and /admin', async () => {
+    const admin = { authorization: `Bearer ${tokenFor('admin')}` }
+    for (const url of ['/api/movies', '/api/theatres', '/api/shows']) {
+      expect((await gateway.inject({ method: 'POST', url, headers: admin, payload: {} })).statusCode).toBe(
+        404,
+      )
+    }
   })
 
   it('only customers can place orders', async () => {
