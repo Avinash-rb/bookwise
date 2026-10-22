@@ -63,7 +63,32 @@ export const SeatMapResponse = Type.Object({
   seats_by_row: Type.Record(Type.String(), Type.Array(SeatView)),
 })
 
-// ── Saga endpoints (called by the order service) ─────────────
+// ── Internal reservation endpoints (called by the order saga) ─
+const SeatIds = Type.Array(Type.String({ format: 'uuid' }), {
+  minItems: 1,
+  maxItems: 10,
+  uniqueItems: true,
+})
+
+export const CreateReservationBody = Type.Object({
+  order_id: Type.String({ format: 'uuid' }),
+  show_id: Type.String({ format: 'uuid' }),
+  seat_ids: SeatIds,
+})
+
+export const ConfirmReservationBody = Type.Object({ seat_ids: SeatIds })
+
+export const OrderIdParams = Type.Object({ orderId: Type.String({ format: 'uuid' }) })
+
+export const ReservationResponse = Type.Object({
+  order_id: Type.String(),
+  show_id: Type.String(),
+  seats: Type.Array(Type.Object({ show_seat_id: Type.String(), price: Type.String() })),
+  total_amount: Type.String(), // decimal string, e.g. "500.00"
+  reserved_until: Type.Union([Type.String(), Type.Null()]),
+})
+
+// ── Old saga endpoints (removed once order-service uses /internal) ─
 export const ReserveSeatsBody = Type.Object({
   seat_ids: Type.Array(Type.String({ format: 'uuid' }), {
     minItems: 1,

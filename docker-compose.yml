@@ -22,6 +22,9 @@ x-postgres: &postgres
 
 x-db-password: &db-password ${POSTGRES_PASSWORD:-password}
 
+# Shared secret our services send on /internal/* calls (see common/internal.ts).
+x-internal-token: &internal-token ${INTERNAL_SERVICE_TOKEN:?INTERNAL_SERVICE_TOKEN must be set in .env}
+
 services:
   # ── Infrastructure ───────────────────────────────────────────
   # Host ports are bound to 127.0.0.1 only: reachable for local development
@@ -179,6 +182,9 @@ services:
       <<: *node-env
       INVENTORY_SERVICE_PORT: 3002
       INVENTORY_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@inventory-db:5432/inventorydb
+      INTERNAL_SERVICE_TOKEN: *internal-token
+      RESERVATION_TTL_SECONDS: ${RESERVATION_TTL_SECONDS:-600}
+      SWEEP_INTERVAL_MS: ${SWEEP_INTERVAL_MS:-15000}
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3002/health/ready']
       interval: 10s
