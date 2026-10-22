@@ -87,15 +87,3 @@ export const ReservationResponse = Type.Object({
   total_amount: Type.String(), // decimal string, e.g. "500.00"
   reserved_until: Type.Union([Type.String(), Type.Null()]),
 })
-
-// ── Old saga endpoints (removed once order-service uses /internal) ─
-export const ReserveSeatsBody = Type.Object({
-  seat_ids: Type.Array(Type.String({ format: 'uuid' }), {
-    minItems: 1,
-    maxItems: 10,
-    uniqueItems: true,
-  }),
-  order_id: Type.String({ format: 'uuid' }),
-})
-
-export const OrderRefBody = Type.Object({ order_id: Type.String({ format: 'uuid' }) })

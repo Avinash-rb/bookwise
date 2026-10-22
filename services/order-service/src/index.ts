@@ -9,7 +9,8 @@ import {
 } from '@bookwise/common'
 import { config } from './config'
 import orderRoutes from './routes/orders'
-import { createSaga } from './services/saga'
+import { createStepRunner } from './saga/steps'
+import { createSagaWorker } from './saga/worker'
 
 async function main() {
   const logger = createLogger({
@@ -23,19 +24,37 @@ async function main() {
     await runMigrations(pool, path.join(__dirname, '..', 'migrations'), logger)
   }
 
-  const saga = createSaga({
+  const worker = createSagaWorker({
     pool,
-    logger,
-    inventoryUrl: config.INVENTORY_SERVICE_URL,
-    paymentUrl: config.PAYMENT_SERVICE_URL,
+    logger: logger.child({ component: 'saga-worker' }),
+    runStep: createStepRunner({
+      inventoryUrl: config.INVENTORY_SERVICE_URL,
+      paymentUrl: config.PAYMENT_SERVICE_URL,
+      internalToken: config.INTERNAL_SERVICE_TOKEN,
+      timeoutMs: config.SAGA_STEP_TIMEOUT_MS,
+    }),
+    options: {
+      pollIntervalMs: config.SAGA_POLL_INTERVAL_MS,
+      batchSize: config.SAGA_BATCH_SIZE,
+      leaseSeconds: config.SAGA_LEASE_SECONDS,
+      maxAttempts: config.SAGA_MAX_ATTEMPTS,
+    },
   })
 
   const app = createApp(logger)
-  app.addHook('onClose', () => pool.end())
+  // Stop the worker (letting in-flight steps finish and save) before closing
+  // the pool it uses.
+  app.addHook('onClose', async () => {
+    await worker.stop()
+    await pool.end()
+  })
 
   await app.register(healthPlugin, { checks: { postgres: () => pool.query('SELECT 1') } })
-  await app.register(orderRoutes, { prefix: '/orders', pool, saga })
+  await app.register(orderRoutes, { prefix: '/orders', pool, worker })
 
+  // Also picks up sagas left unfinished by a previous crash (their leases
+  // have expired), so bookings resume after a restart.
+  worker.start()
   await startServer(app, { port: config.ORDER_SERVICE_PORT, logger })
 }
 

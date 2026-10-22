@@ -164,6 +164,7 @@ services:
       <<: *node-env
       ORDER_SERVICE_PORT: 3001
       ORDER_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@order-db:5432/orderdb
+      INTERNAL_SERVICE_TOKEN: *internal-token
       INVENTORY_SERVICE_URL: http://inventory-service:3002
       PAYMENT_SERVICE_URL: http://payment-service:3003
     healthcheck:
