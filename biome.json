@@ -24,6 +24,12 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["scripts/proof/lib.network.mjs"],
+      "linter": { "rules": { "correctness": { "noUnusedVariables": "off" } } }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "single",

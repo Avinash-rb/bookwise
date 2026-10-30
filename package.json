@@ -21,7 +21,9 @@
     "infra:up": "docker compose up -d auth-db order-db inventory-db payment-db redis rabbitmq",
     "up": "docker compose up --build -d",
     "down": "docker compose down",
-    "keys:generate": "node scripts/generate-jwt-keys.mjs"
+    "keys:generate": "node scripts/generate-jwt-keys.mjs",
+    "proof:race": "node scripts/proof/race.mjs",
+    "proof:crash": "node scripts/proof/crash.mjs"
   },
   "keywords": [],
   "author": "Avinash Birajdar",
