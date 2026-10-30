@@ -17,12 +17,13 @@ if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
 const run = Date.now().toString(36) // unique emails per run
 let failures = 0
 
-async function call(method, path, { token, body } = {}) {
+async function call(method, path, { token, body, headers = {} } = {}) {
   const res = await fetch(BASE + path, {
     method,
     headers: {
       ...(body ? { 'content-type': 'application/json' } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
   })
@@ -132,15 +133,36 @@ step(
   403,
   'blocked by the gateway',
 )
-const order = step(
-  'Customer books seats A1 + A2',
-  await call('POST', '/api/orders', {
+// The checkout page sends an Idempotency-Key, so a double click can't book twice.
+const book = () =>
+  call('POST', '/api/orders', {
     token: customer.access_token,
-    body: { show_id: show.id, seat_ids: seats, total_amount: 500 },
-  }),
-  201,
-)
-console.log(`  → order ${order.status}: ${order.message} (payments are randomly declined 10% of the time)`)
+    headers: { 'idempotency-key': `checkout-${run}` },
+    body: { show_id: show.id, seat_ids: seats }, // no price: inventory decides it
+  })
+const order = step('Customer books seats A1 + A2', await book(), 202, 'accepted, runs in the background')
+const again = step('Same request again (double click, same key)', await book(), 202)
+if (again.order_id !== order.order_id || !again.replayed) {
+  failures++
+  console.log('✘ the second click created a new order')
+} else {
+  console.log('  → same order returned, nothing booked twice')
+}
+
+// Poll until the saga finishes (a frontend would show a spinner meanwhile).
+let booking = order
+for (let i = 0; i < 40 && booking.status === 'PENDING'; i++) {
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  booking = (await call('GET', `/api/orders/${order.order_id}`, { token: customer.access_token })).json
+}
+const reason = booking.failure_reason
+  ? `, reason: ${booking.failure_reason} (payments are randomly declined 10% of the time)`
+  : ''
+console.log(`  → ${booking.status}, total ${booking.total_amount} (priced by inventory)${reason}`)
+if (booking.status === 'PENDING') {
+  failures++
+  console.log('✘ the booking did not finish within 10 s')
+}
 
 // ── Ownership: orders are private ──
 const own = step(

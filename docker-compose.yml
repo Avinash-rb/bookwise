@@ -22,6 +22,9 @@ x-postgres: &postgres
 
 x-db-password: &db-password ${POSTGRES_PASSWORD:-password}
 
+# Shared secret our services send on /internal/* calls (see common/internal.ts).
+x-internal-token: &internal-token ${INTERNAL_SERVICE_TOKEN:?INTERNAL_SERVICE_TOKEN must be set in .env}
+
 services:
   # ── Infrastructure ───────────────────────────────────────────
   # Host ports are bound to 127.0.0.1 only: reachable for local development
@@ -161,6 +164,7 @@ services:
       <<: *node-env
       ORDER_SERVICE_PORT: 3001
       ORDER_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@order-db:5432/orderdb
+      INTERNAL_SERVICE_TOKEN: *internal-token
       INVENTORY_SERVICE_URL: http://inventory-service:3002
       PAYMENT_SERVICE_URL: http://payment-service:3003
     healthcheck:
@@ -179,6 +183,9 @@ services:
       <<: *node-env
       INVENTORY_SERVICE_PORT: 3002
       INVENTORY_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@inventory-db:5432/inventorydb
+      INTERNAL_SERVICE_TOKEN: *internal-token
+      RESERVATION_TTL_SECONDS: ${RESERVATION_TTL_SECONDS:-600}
+      SWEEP_INTERVAL_MS: ${SWEEP_INTERVAL_MS:-15000}
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3002/health/ready']
       interval: 10s
@@ -195,6 +202,10 @@ services:
       <<: *node-env
       PAYMENT_SERVICE_PORT: 3003
       PAYMENT_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@payment-db:5432/paymentdb
+      INTERNAL_SERVICE_TOKEN: *internal-token
+      # Fake payment provider: share of cards declined, and how slow it answers.
+      PAYMENT_DECLINE_RATE: ${PAYMENT_DECLINE_RATE:-0.1}
+      PAYMENT_PROVIDER_LATENCY_MS: ${PAYMENT_PROVIDER_LATENCY_MS:-0}
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3003/health/ready']
       interval: 10s
