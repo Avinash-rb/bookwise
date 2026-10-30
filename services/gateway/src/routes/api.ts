@@ -36,6 +36,9 @@ const ROUTES: RouteSpec[] = [
 
   // ── Admin: the platform curates the movie catalogue ──
   { method: 'POST', url: '/api/admin/movies', upstream: 'inventory', path: '/admin/movies', access: ['admin'] },
+  // ── Admin: support queue for bookings the saga parked as NEEDS_ATTENTION ──
+  { method: 'GET', url: '/api/admin/orders', upstream: 'order', path: '/admin/orders', access: ['admin'] },
+  { method: 'POST', url: '/api/admin/orders/:id/retry', upstream: 'order', path: '/admin/orders/:id/retry', access: ['admin'] },
 
   // ── Vendors run theatres (inventory-service checks they own the theatre) ──
   { method: 'GET', url: '/api/vendor/theatres', upstream: 'inventory', path: '/vendor/theatres', access: ['vendor', 'admin'] },

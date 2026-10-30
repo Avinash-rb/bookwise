@@ -1,4 +1,9 @@
-import { INTERNAL_TOKEN_HEADER } from '@bookwise/common'
+import {
+  type CircuitBreaker,
+  createCircuitBreaker,
+  INTERNAL_TOKEN_HEADER,
+  type Logger,
+} from '@bookwise/common'
 import type { SagaStep, StepOutcome } from './decide'
 
 // One order, as claimed by the worker.
@@ -23,6 +28,7 @@ export interface StepDeps {
   paymentUrl: string
   internalToken: string
   timeoutMs: number
+  logger: Logger
 }
 
 // "Try again later" vs "no". 5xx / 408 / 429 are the other side's temporary
@@ -34,8 +40,23 @@ export const isTransientStatus = (status: number) =>
 
 type Reply = { status: number; body: Record<string, unknown> } | { error: string }
 
-export function createStepRunner({ inventoryUrl, paymentUrl, internalToken, timeoutMs }: StepDeps) {
-  async function post(url: string, body: object = {}): Promise<Reply> {
+export function createStepRunner({ inventoryUrl, paymentUrl, internalToken, timeoutMs, logger }: StepDeps) {
+  // One circuit breaker per service we call. When payment is down, its
+  // breaker opens and payment steps fail instantly instead of each waiting
+  // 5 s for a timeout; inventory steps are unaffected.
+  const breakerFor = (upstream: string) =>
+    createCircuitBreaker({
+      failureThreshold: 5,
+      resetMs: 10_000,
+      onStateChange: (from, to) => logger.warn({ upstream, from, to }, `circuit breaker ${to}`),
+    })
+  const inventory = breakerFor('inventory-service')
+  const payment = breakerFor('payment-service')
+
+  async function post(breaker: CircuitBreaker, url: string, body: object = {}): Promise<Reply> {
+    // Circuit open: don't even try. For the saga it's a temporary failure:
+    // the step is retried later with backoff, when the circuit may be closed.
+    if (!breaker.allow()) return { error: 'circuit open' }
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -44,12 +65,16 @@ export function createStepRunner({ inventoryUrl, paymentUrl, internalToken, time
         signal: AbortSignal.timeout(timeoutMs),
       })
       const json: unknown = await res.json().catch(() => ({}))
+      // A business "no" (409, 402...) still means the service is healthy.
+      if (isTransientStatus(res.status)) breaker.failure()
+      else breaker.success()
       return {
         status: res.status,
         body: typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {},
       }
     } catch (err) {
       // Timeout, connection refused, DNS... we don't know if it was done.
+      breaker.failure()
       return { error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) }
     }
   }
@@ -67,10 +92,11 @@ export function createStepRunner({ inventoryUrl, paymentUrl, internalToken, time
 
   async function runStep(order: SagaOrder): Promise<StepResult> {
     const reservation = `${inventoryUrl}/internal/reservations/${order.id}`
+    const paymentOf = `${paymentUrl}/internal/payments`
 
     switch (order.step) {
       case 'RESERVE_SEATS': {
-        const reply = await post(`${inventoryUrl}/internal/reservations`, {
+        const reply = await post(inventory, `${inventoryUrl}/internal/reservations`, {
           order_id: order.id,
           show_id: order.show_id,
           seat_ids: order.seat_ids,
@@ -82,33 +108,31 @@ export function createStepRunner({ inventoryUrl, paymentUrl, internalToken, time
       }
 
       case 'PROCESS_PAYMENT': {
-        // The same idempotency key (the order id) on every retry: the payment
-        // service returns the stored result instead of charging again.
-        const reply = await post(`${paymentUrl}/payments`, {
-          order_id: order.id,
-          amount: Number(order.total_amount),
-          idempotency_key: order.id,
-        })
-        if (succeeded(reply, 200, 201)) return ok
-        return { outcome: failure(reply, { 402: 'PAYMENT_DECLINED' }) }
+        if (!order.total_amount) return { outcome: { type: 'rejected', reason: 'MISSING_TOTAL' } }
+        // The order id is the idempotency key: a retry (e.g. after a timeout)
+        // returns what happened the first time instead of charging again.
+        const reply = await post(payment, paymentOf, { order_id: order.id, amount: order.total_amount })
+        if (succeeded(reply, 200)) return ok
+        return { outcome: failure(reply, { 402: 'PAYMENT_DECLINED', 422: 'AMOUNT_MISMATCH' }) }
       }
 
       case 'CONFIRM_SEATS': {
-        const reply = await post(`${reservation}/confirm`, { seat_ids: order.seat_ids })
+        const reply = await post(inventory, `${reservation}/confirm`, { seat_ids: order.seat_ids })
         if (succeeded(reply, 200)) return ok
         return { outcome: failure(reply, { 409: 'RESERVATION_LOST' }) }
       }
 
       case 'REFUND_PAYMENT': {
-        const reply = await post(`${paymentUrl}/payments/refund`, { order_id: order.id })
-        // 404 = "no completed payment for this order": never charged, or
-        // already refunded. Either way the goal (no money taken) is reached.
-        if (succeeded(reply, 200, 404)) return ok
+        // Idempotent on payment-service's side: "never charged" and "already
+        // refunded" are both a 200. If a charge's outcome was unknown, it
+        // asks the provider first, so a late charge can't slip past a refund.
+        const reply = await post(payment, `${paymentOf}/${order.id}/refund`)
+        if (succeeded(reply, 200)) return ok
         return { outcome: failure(reply, {}) }
       }
 
       case 'RELEASE_SEATS': {
-        const reply = await post(`${reservation}/release`)
+        const reply = await post(inventory, `${reservation}/release`)
         if (succeeded(reply, 200)) return ok
         return { outcome: failure(reply, {}) }
       }

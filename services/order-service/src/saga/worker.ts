@@ -4,12 +4,12 @@ import type { RunStep, SagaOrder, StepResult } from './steps'
 
 export interface WorkerOptions {
   pollIntervalMs: number
-  batchSize: number
+  concurrency: number // max steps running at once in this process
   leaseSeconds: number // must be longer than one step's HTTP timeout
   maxAttempts: number
 }
 
-// Runs in every order-service replica. Each loop:
+// Runs in every order-service replica. For each order:
 //   1. CLAIM due orders (short transaction): FOR UPDATE SKIP LOCKED, so two
 //      replicas never claim the same order, plus a lease (locked_until) and a
 //      version bump.
@@ -32,7 +32,7 @@ export function createSagaWorker({
   runStep: RunStep
   options: WorkerOptions
 }) {
-  async function claimDue(): Promise<SagaOrder[]> {
+  async function claimDue(limit: number): Promise<SagaOrder[]> {
     const { rows } = await pool.query<SagaOrder>(
       `UPDATE orders o
        SET locked_until = now() + make_interval(secs => $2), version = o.version + 1
@@ -47,7 +47,7 @@ export function createSagaWorker({
        WHERE o.id = due.id
        RETURNING o.id, o.saga_step AS step, o.attempts, o.version, o.show_id, o.total_amount,
          ARRAY(SELECT show_seat_id::text FROM order_seats WHERE order_id = o.id ORDER BY 1) AS seat_ids`,
-      [options.batchSize, options.leaseSeconds],
+      [limit, options.leaseSeconds],
     )
     return rows
   }
@@ -141,34 +141,51 @@ export function createSagaWorker({
     return transition
   }
 
-  // Returns true if there's probably more work right now.
-  async function runOnce(): Promise<boolean> {
-    const due = await claimDue()
-    const transitions = await Promise.all(
-      due.map((order) =>
-        processOne(order).catch((err: unknown) => {
-          // E.g. the DB failed while saving. The lease expires and the step
-          // is retried later, so nothing is lost.
-          logger.error({ err, orderId: order.id }, 'saga step crashed')
-          return null
-        }),
-      ),
-    )
-    return due.length === options.batchSize || transitions.some((t) => t?.schedule === 'now')
-  }
-
-  // ── The loop: poll, but run again at once when there's more to do ──
+  // ── The loop ───────────────────────────────────────────────────
+  // The loop only HANDS OUT work: it claims as many due orders as there are
+  // free slots and starts each one on its own. It never waits for a step to
+  // finish, so one slow call (payment hanging until its timeout) can't hold up
+  // other orders — no head-of-line blocking. `concurrency` caps how many steps
+  // run at once in this process.
+  const inFlight = new Set<Promise<unknown>>()
   let timer: NodeJS.Timeout | undefined
   let current: Promise<void> = Promise.resolve()
   let busy = false
   let wakeRequested = false
   let stopped = false
 
+  function launch(order: SagaOrder) {
+    const work = processOne(order)
+      .then((transition) => {
+        // The next step is due right away (e.g. reserve -> pay): don't wait for the poll.
+        if (transition.schedule === 'now') wake()
+      })
+      .catch((err: unknown) => {
+        // E.g. the DB failed while saving. The lease expires and the step is
+        // retried later, so nothing is lost.
+        logger.error({ err, orderId: order.id }, 'saga step crashed')
+      })
+      .finally(() => {
+        inFlight.delete(work)
+        wake() // a slot is free again
+      })
+    inFlight.add(work)
+  }
+
+  // Returns true if there's probably more due work than we had slots for.
+  async function claimAndLaunch(): Promise<boolean> {
+    const free = options.concurrency - inFlight.size
+    if (free <= 0) return false
+    const due = await claimDue(free)
+    for (const order of due) launch(order)
+    return due.length === free
+  }
+
   const tick = async () => {
     busy = true
     let again = false
     try {
-      again = await runOnce()
+      again = await claimAndLaunch()
     } catch (err) {
       logger.error({ err }, 'saga worker loop failed')
     }
@@ -181,24 +198,27 @@ export function createSagaWorker({
     current = tick()
   }
 
+  // Look for work now instead of at the next poll: after a new order is
+  // committed, a step finished, or a slot freed up.
+  function wake() {
+    if (stopped) return
+    if (busy) {
+      wakeRequested = true
+      return
+    }
+    clearTimeout(timer)
+    run()
+  }
+
   return {
     start: run,
-    // Called right after a new order is committed, so it doesn't wait for
-    // the next poll.
-    wake: () => {
-      if (stopped) return
-      if (busy) {
-        wakeRequested = true
-        return
-      }
-      clearTimeout(timer)
-      run()
-    },
-    // Graceful shutdown: no new loops; let the current steps finish and save.
+    wake,
+    // Graceful shutdown: claim nothing new; let running steps finish and save.
     stop: async () => {
       stopped = true
       clearTimeout(timer)
       await current
+      await Promise.all(inFlight)
     },
   }
 }

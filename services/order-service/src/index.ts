@@ -8,6 +8,7 @@ import {
   startServer,
 } from '@bookwise/common'
 import { config } from './config'
+import adminRoutes from './routes/admin'
 import orderRoutes from './routes/orders'
 import { createStepRunner } from './saga/steps'
 import { createSagaWorker } from './saga/worker'
@@ -32,10 +33,11 @@ async function main() {
       paymentUrl: config.PAYMENT_SERVICE_URL,
       internalToken: config.INTERNAL_SERVICE_TOKEN,
       timeoutMs: config.SAGA_STEP_TIMEOUT_MS,
+      logger: logger.child({ component: 'saga-steps' }),
     }),
     options: {
       pollIntervalMs: config.SAGA_POLL_INTERVAL_MS,
-      batchSize: config.SAGA_BATCH_SIZE,
+      concurrency: config.SAGA_CONCURRENCY,
       leaseSeconds: config.SAGA_LEASE_SECONDS,
       maxAttempts: config.SAGA_MAX_ATTEMPTS,
     },
@@ -51,6 +53,7 @@ async function main() {
 
   await app.register(healthPlugin, { checks: { postgres: () => pool.query('SELECT 1') } })
   await app.register(orderRoutes, { prefix: '/orders', pool, worker })
+  await app.register(adminRoutes, { prefix: '/admin', pool, worker })
 
   // Also picks up sagas left unfinished by a previous crash (their leases
   // have expired), so bookings resume after a restart.

@@ -202,6 +202,10 @@ services:
       <<: *node-env
       PAYMENT_SERVICE_PORT: 3003
       PAYMENT_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-password}@payment-db:5432/paymentdb
+      INTERNAL_SERVICE_TOKEN: *internal-token
+      # Fake payment provider: share of cards declined, and how slow it answers.
+      PAYMENT_DECLINE_RATE: ${PAYMENT_DECLINE_RATE:-0.1}
+      PAYMENT_PROVIDER_LATENCY_MS: ${PAYMENT_PROVIDER_LATENCY_MS:-0}
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3003/health/ready']
       interval: 10s

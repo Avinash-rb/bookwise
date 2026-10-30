@@ -13,7 +13,7 @@ export const config = loadConfig(
     INTERNAL_SERVICE_TOKEN: internalServiceToken(),
     // Saga worker
     SAGA_POLL_INTERVAL_MS: positiveInt(500), // how often to look for due orders
-    SAGA_BATCH_SIZE: positiveInt(10), // orders handled in parallel per loop
+    SAGA_CONCURRENCY: positiveInt(20), // max saga steps running at once per process
     SAGA_STEP_TIMEOUT_MS: positiveInt(5_000), // one HTTP call to another service
     SAGA_LEASE_SECONDS: positiveInt(30), // claim length; must exceed the step timeout
     SAGA_MAX_ATTEMPTS: positiveInt(5), // tries per step before giving up
